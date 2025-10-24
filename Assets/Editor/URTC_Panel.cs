@@ -10,7 +10,8 @@ using System.Collections.Generic;
 public class StartCollaborationRequest
 {
     public string project_name;
-    public string user_email;
+    public string user_email
+            public string user_token;  // Email-based auto-generated token;
 }
 
 [System.Serializable]
@@ -129,7 +130,8 @@ public class URTC_Panel : EditorWindow
         StartCollaborationRequest request = new StartCollaborationRequest
         {
             project_name = projectName,
-            user_email = userEmail
+            user_email = userEmai,
+                        user_token = GenerateEmailBasedToken(userEmail)l
         };
 
         string jsonData = JsonUtility.ToJson(request);
@@ -225,7 +227,21 @@ public class URTC_Panel : EditorWindow
                         Debug.LogError($"Response that failed to parse: {responseText}");
                     }
                 }
-            }
+            
+            
+                // Generate email-based token for authentication
+    private string GenerateEmailBasedToken(string email)
+    {
+        if (string.IsNullOrEmpty(email))
+            return "";
+        
+        // Generate a unique token based on email using SHA256
+        using (System.Security.Cryptography.SHA256 sha256 = System.Security.Cryptography.SHA256.Create())
+        {
+            byte[] hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(email + "URTC_SECRET_2025"));
+            return System.Convert.ToBase64String(hashBytes).Substring(0, 16);
+        }
+    }}
             // catch (Exception e)
             // {
             //     // Catch any unexpected errors in the entire process
