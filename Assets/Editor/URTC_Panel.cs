@@ -11,6 +11,9 @@ public class StartCollaborationRequest
 {
     public string project_name;
     public string user_email;
+        public string project_path;      // NEW
+        public string description;       // NEW
+        public string join_token;        // NEW, optional
 }
 
 [System.Serializable]
@@ -31,6 +34,10 @@ public class URTC_Panel : EditorWindow
     private string currentProjectID = "";
     private string currentRepoURL = "";
     private string collaboratorEmail = "";
+        private string projectName = "";
+            private string projectDescription = "";
+                private string projectPath = "";
+                    private string joinToken = "";
 
     [MenuItem("Window/URTC Panel")]
     public static void ShowWindow()
@@ -57,6 +64,10 @@ public class URTC_Panel : EditorWindow
                 {
                     Application.OpenURL(currentRepoURL);
                 }
+                            if (GUILayout.Button("Push Changes to GitHub"))
+                                        {
+                                                        PushToGitHub();
+                                                                    }
             }
             GUILayout.Space(10);
         }
@@ -88,6 +99,14 @@ public class URTC_Panel : EditorWindow
 
             GUILayout.Space(10);
 
+                        GUILayout.Label("Project Name:", EditorStyles.boldLabel);
+            projectName = EditorGUILayout.TextField("Name", Application.productName);
+                                                GUILayout.Label("Project Description (optional):", EditorStyles.boldLabel);
+            projectDescription = EditorGUILayout.TextField("Description", "");                                                                        string projectPath = Application.dataPath;
+                        projectPath = Application.dataPath;
+
+                                                                                    GUILayout.Label("Join Token (if joining):", EditorStyles.boldLabel);
+            joinToken = EditorGUILayout.TextField("Token", "");
             GUI.enabled = !isLoading && !string.IsNullOrEmpty(userEmail);
             if (GUILayout.Button(isLoading ? "Creating Repository..." : "Start Collaboration"))
             {
@@ -99,15 +118,19 @@ public class URTC_Panel : EditorWindow
         GUILayout.Label("Add Collaborators", EditorStyles.boldLabel);
         collaboratorEmail = EditorGUILayout.TextField("Collaborator Email", collaboratorEmail);
          
-        if (GUILayout.Button("Add Collaborator"))
-        {
-            if (!string.IsNullOrEmpty(collaboratorEmail))
-            {
-                Debug.Log($"Adding collaborator: {collaboratorEmail}");
-                statusMessage = "Collaborator functionality coming soon!";
-            }
-        }
+        if (GUILayout.Button("Send Collaborator Request"))        {
+            if (!string.IsNullOrEmpty(collaboratorEmail) && !string.IsNullOrEmpty(currentProjectID))
+                        {
+                                        AddCollaborator(collaboratorEmail, currentProjectID);
+                                                    }
+                                                                else{
+                statusMessage = "Enter collaborator email and project ID.";        }
     }
+
+            if (GUILayout.Button("Pull Latest from GitHub (after approval)"))
+                    {
+                                PullFromGitHub(currentRepoURL);
+                                        }
 
     private void StartCollaboration()
     {
@@ -129,7 +152,11 @@ public class URTC_Panel : EditorWindow
         StartCollaborationRequest request = new StartCollaborationRequest
         {
             project_name = projectName,
-            user_email = userEmail
+            user_email = userEmail,
+            ,                        project_path = projectPath,
+                                    description = projectDescription,
+                                                join_token = joinToken
+                                                        };
         };
 
         string jsonData = JsonUtility.ToJson(request);
@@ -248,4 +275,79 @@ public class URTC_Panel : EditorWindow
         // Stop all coroutines when window is closed
         EditorCoroutineUtility.StopAllCoroutines();
     }
+
+        private void PushToGitHub()
+            {
+                    statusMessage = "Attempting to push changes to GitHub...";
+                            // Trigger API call to push code
+                                    // Implement your push request here
+                                        }
 }
+
+    [System.Serializable]
+        public class CollaboratorRequest {
+                public string collaborator_email;
+                        public string project_id;
+                            }
+                            
+                            private void AddCollaborator(string email, string projectID)
+            {
+                CollaboratorRequest collabReq = new CollaboratorRequest {
+                                collaborator_email = email,
+                                project_id = projectID
+                                            };
+                string jsonData = JsonUtility.ToJson(collabReq);
+                EditorCoroutineUtility.StartCoroutine(SendAddCollaboratorRequest(jsonData));
+            }
+
+    private IEnumerator SendAddCollaboratorRequest(string jsonData)
+            {
+                string url = serverURL + "/api/add-collaborator";
+                using (UnityWebRequest www = new UnityWebRequest(url, "POST"))
+                            {
+                                byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonData);
+                                www.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                                www.downloadHandler = new DownloadHandlerBuffer();
+                                www.SetRequestHeader("Content-Type", "application/json");
+                                www.timeout = 30;
+                                yield return www.SendWebRequest();
+                                if (www.result == UnityWebRequest.Result.Success)
+                                                {
+                                                    statusMessage = "Collaborator request sent. Awaiting admin approval.";
+                                                }
+                                else
+                                                {
+                                                    statusMessage = "Error sending collaborator request: " + www.error;
+                                                }
+                                Repaint();
+                            }
+            }
+
+    private void PullFromGitHub(string repoUrlOrID)
+            {
+                EditorCoroutineUtility.StartCoroutine(SendGitPullRequest(repoUrlOrID));
+            }
+
+    private IEnumerator SendGitPullRequest(string repoOrID)
+            {
+                string url = serverURL + "/api/git-pull";
+                string jsonData = "{\"project_id\":\"" + currentProjectID + "\"}";
+                using (UnityWebRequest www = new UnityWebRequest(url, "POST"))
+                            {
+                                byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonData);
+                                www.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                                www.downloadHandler = new DownloadHandlerBuffer();
+                                www.SetRequestHeader("Content-Type", "application/json");
+                                www.timeout = 30;
+                                yield return www.SendWebRequest();
+                                if (www.result == UnityWebRequest.Result.Success)
+                                                {
+                                                    statusMessage = "Pulled latest from GitHub!";
+                                                }
+                                else
+                                                {
+                                                    statusMessage = "Error while pulling: " + www.error;
+                                                }
+                                Repaint();
+                            }
+            }
