@@ -6,246 +6,314 @@ using UnityEngine.Networking;
 using System;
 using System.Collections.Generic;
 
+#region Data Classes
+
 [System.Serializable]
-public class StartCollaborationRequest
+public class CollaborationRequest
 {
     public string project_name;
     public string user_email;
+    public string project_description;
+    public string token; // used only for collaborators
 }
 
 [System.Serializable]
-public class StartCollaborationResponse
+public class CollaborationResponse
 {
     public bool success;
     public string message;
     public string project_id;
     public string repo_url;
+    public string token;
 }
+
+#endregion
 
 public class URTC_Panel : EditorWindow
 {
-    private string userEmail = "";
+    private enum PanelMode { Owner, Collaborator }
+    private PanelMode currentMode = PanelMode.Owner;
+
+    // Common fields
     private string serverURL = "http://0.0.0.0:8080";
+    private string userEmail = "";
     private bool isLoading = false;
     private string statusMessage = "";
+
+    // Owner fields
+    private string projectName = "";
+    private string projectDescription = "";
+    private string projectPath = "";
+    private string token = "";
     private string currentProjectID = "";
     private string currentRepoURL = "";
     private string collaboratorEmail = "";
+
+    // Collaborator fields
+    private string joinToken = "";
 
     [MenuItem("Window/URTC Panel")]
     public static void ShowWindow()
     {
         URTC_Panel window = GetWindow<URTC_Panel>();
-        window.titleContent = new GUIContent("URTC Panel");
+        window.titleContent = new GUIContent("URTC Collaboration");
         window.Show();
     }
 
-    void OnGUI()
+    private void OnEnable()
+    {
+        projectName = Application.productName;
+        projectPath = Application.dataPath.Replace("/Assets", "");
+    }
+
+    private void OnGUI()
     {
         GUILayout.Space(10);
-        GUILayout.Label("Initialize a URTC Repository", EditorStyles.boldLabel);
-        
-        if (!string.IsNullOrEmpty(currentProjectID))
-        {
-            GUILayout.Space(10);
-            GUILayout.Label("Current Project:", EditorStyles.boldLabel);
-            GUILayout.Label($"Project ID: {currentProjectID}");
-            if (!string.IsNullOrEmpty(currentRepoURL))
-            {
-                GUILayout.Label($"Repository: {currentRepoURL}");
-                if (GUILayout.Button("Open Repository"))
-                {
-                    Application.OpenURL(currentRepoURL);
-                }
-            }
-            GUILayout.Space(10);
-        }
+        GUILayout.Label("URTC Collaboration Panel", EditorStyles.boldLabel);
+        GUILayout.Space(10);
+
+        currentMode = (PanelMode)GUILayout.Toolbar((int)currentMode, new string[] { "Owner", "Collaborator" });
+        GUILayout.Space(10);
 
         if (!string.IsNullOrEmpty(statusMessage))
         {
-            GUILayout.Space(5);
-            GUIStyle style = new GUIStyle(EditorStyles.label);
-            style.normal.textColor = statusMessage.Contains("Error") ? Color.red : Color.green;
+            GUIStyle style = new GUIStyle(EditorStyles.helpBox)
+            {
+                normal = { textColor = statusMessage.StartsWith("Error") ? Color.red : Color.green }
+            };
             GUILayout.Label(statusMessage, style);
-            GUILayout.Space(5);
+            GUILayout.Space(10);
         }
 
-        if (string.IsNullOrEmpty(currentProjectID))
+        switch (currentMode)
         {
-
-            GUILayout.Label("Server URL:", EditorStyles.boldLabel);
-            serverURL = EditorGUILayout.TextField("Server URL", serverURL);
-
-            GUILayout.Space(10);
-
-            GUILayout.Label("Status:", EditorStyles.boldLabel);
-            statusMessage = EditorGUILayout.TextField("Status", statusMessage);
-
-            GUILayout.Space(10);
-
-            GUILayout.Label("User Email:", EditorStyles.boldLabel);
-            userEmail = EditorGUILayout.TextField("Email", userEmail);
-
-            GUILayout.Space(10);
-
-            GUI.enabled = !isLoading && !string.IsNullOrEmpty(userEmail);
-            if (GUILayout.Button(isLoading ? "Creating Repository..." : "Start Collaboration"))
-            {
-                StartCollaboration();
-            }
-            GUI.enabled = true;
+            case PanelMode.Owner:
+                DrawOwnerPanel();
+                break;
+            case PanelMode.Collaborator:
+                DrawCollaboratorPanel();
+                break;
         }
+
         GUILayout.Space(20);
-        GUILayout.Label("Add Collaborators", EditorStyles.boldLabel);
-        collaboratorEmail = EditorGUILayout.TextField("Collaborator Email", collaboratorEmail);
-         
-        if (GUILayout.Button("Add Collaborator"))
+        if (!string.IsNullOrEmpty(currentRepoURL) && GUILayout.Button("Open Repository"))
         {
-            if (!string.IsNullOrEmpty(collaboratorEmail))
+            Application.OpenURL(currentRepoURL);
+        }
+    }
+
+    #region Owner Panel
+
+    private void DrawOwnerPanel()
+    {
+        GUILayout.Label("Start New Collaboration", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Server URL", serverURL);
+        userEmail = EditorGUILayout.TextField("Your Email", userEmail);
+        projectName = EditorGUILayout.TextField("Project Name", projectName);
+        projectDescription = EditorGUILayout.TextField("Description (optional)", projectDescription);
+
+        GUI.enabled = !isLoading && !string.IsNullOrEmpty(userEmail);
+        if (GUILayout.Button(isLoading ? "Creating..." : "Start Collaboration"))
+        {
+            StartCollaboration();
+        }
+        GUI.enabled = true;
+
+        if (!string.IsNullOrEmpty(currentProjectID))
+        {
+            GUILayout.Space(15);
+            GUILayout.Label("Project Details", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Project ID", currentProjectID);
+            EditorGUILayout.LabelField("Repository URL", currentRepoURL);
+            EditorGUILayout.LabelField("Join Token", token);
+
+            GUILayout.Space(10);
+            collaboratorEmail = EditorGUILayout.TextField("Add Collaborator Email", collaboratorEmail);
+            if (GUILayout.Button("Add Collaborator"))
             {
-                Debug.Log($"Adding collaborator: {collaboratorEmail}");
-                statusMessage = "Collaborator functionality coming soon!";
+                statusMessage = "Collaborator invite functionality coming soon!";
+            }
+
+            GUILayout.Space(10);
+            if (GUILayout.Button("Push Changes to GitHub"))
+            {
+                statusMessage = "Pushing changes...";
+                StartSimulatedPush();
+                Debug.Log("Simulating Git push from Unity project...");
             }
         }
     }
+
+    #endregion
+
+    #region Collaborator Panel
+
+    private void DrawCollaboratorPanel()
+    {
+        GUILayout.Label("Join Existing Collaboration", EditorStyles.boldLabel);
+        userEmail = EditorGUILayout.TextField("Your Email", userEmail);
+        joinToken = EditorGUILayout.TextField("Join Token", joinToken);
+
+        GUI.enabled = !isLoading && !string.IsNullOrEmpty(joinToken);
+        if (GUILayout.Button(isLoading ? "Joining..." : "Join Collaboration"))
+        {
+            JoinCollaboration();
+        }
+        GUI.enabled = true;
+
+        if (!string.IsNullOrEmpty(currentRepoURL))
+        {
+            GUILayout.Space(10);
+            EditorGUILayout.LabelField("Connected Repository", currentRepoURL);
+            if (GUILayout.Button("Pull Latest Changes"))
+            {
+                statusMessage = "Pulling latest changes...";
+                StartSimulatedPull();
+                Debug.Log("Simulating Git pull...");
+            }
+        }
+    }
+
+    #endregion
+
+    #region API Calls
 
     private void StartCollaboration()
     {
-        if (string.IsNullOrEmpty(userEmail))
-        {
-            statusMessage = "Error: Please enter your email address";
-            return;
-        }
-
-        isLoading = true;
-        statusMessage = "Authenticating with GitHub...";
-
-        string projectName = Application.productName;
-        if (string.IsNullOrEmpty(projectName))
-        {
-            projectName = "UnityProject_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        }
-
-        StartCollaborationRequest request = new StartCollaborationRequest
+        CollaborationRequest req = new CollaborationRequest
         {
             project_name = projectName,
-            user_email = userEmail
+            user_email = userEmail,
+            project_description = projectDescription
         };
 
-        string jsonData = JsonUtility.ToJson(request);
-
-        // Start the HTTP request coroutine
-        EditorCoroutineUtility.StartCoroutine(SendStartCollaborationRequest(jsonData));
+        string jsonData = JsonUtility.ToJson(req);
+        StartRequestCoroutine(serverURL + "/api/start-collaboration", jsonData, isJoin: false);
     }
 
-    private IEnumerator SendStartCollaborationRequest(string jsonData)
+    private void JoinCollaboration()
     {
-        string url = serverURL + "/api/start-collaboration";
+        CollaborationRequest req = new CollaborationRequest
+        {
+            user_email = userEmail,
+            token = joinToken
+        };
 
-        // Add timeout to prevent hanging indefinitely
+        string jsonData = JsonUtility.ToJson(req);
+        StartRequestCoroutine(serverURL + "/api/join-collaboration", jsonData, isJoin: true);
+    }
+
+    private void StartRequestCoroutine(string url, string jsonData, bool isJoin)
+    {
+        EditorCoroutineUtility.StartCoroutine(SendCollaborationRequest(url, jsonData, isJoin));
+    }
+
+    private IEnumerator SendCollaborationRequest(string url, string jsonData, bool isJoin)
+    {
+        isLoading = true;
+        Repaint();
+
         using (UnityWebRequest www = new UnityWebRequest(url, "POST"))
         {
-            try
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonData);
+            www.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            www.downloadHandler = new DownloadHandlerBuffer();
+            www.SetRequestHeader("Content-Type", "application/json");
+            www.timeout = 30;
+
+            yield return www.SendWebRequest();
+            isLoading = false;
+
+            if (www.result != UnityWebRequest.Result.Success)
             {
-                byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonData);
-                www.uploadHandler = new UploadHandlerRaw(bodyRaw);
-                www.downloadHandler = new DownloadHandlerBuffer();
-                www.SetRequestHeader("Content-Type", "application/json");
+                statusMessage = $"Error: {www.error}";
+            }
+            else
+            {
+                string responseText = www.downloadHandler.text;
+                CollaborationResponse response = JsonUtility.FromJson<CollaborationResponse>(responseText);
 
-                // Set a reasonable timeout (30 seconds)
-                www.timeout = 30;
-
-                yield return www.SendWebRequest();
-
-                isLoading = false;
-
-                // More comprehensive error checking
-                if (www.result == UnityWebRequest.Result.ConnectionError)
+                if (response.success)
                 {
-                    statusMessage = $"Connection Error: Cannot reach server at {serverURL}";
-                    Debug.LogError($"Connection Error: {www.error ?? "Unknown connection error"}");
-                }
-                else if (www.result == UnityWebRequest.Result.ProtocolError)
-                {
-                    statusMessage = $"Server Error: HTTP {www.responseCode}";
-                    Debug.LogError($"Protocol Error: HTTP {www.responseCode} - {www.error ?? "Unknown protocol error"}");
-                }
-                else if (www.result == UnityWebRequest.Result.DataProcessingError)
-                {
-                    statusMessage = "Data Processing Error: Invalid response format";
-                    Debug.LogError($"Data Processing Error: {www.error ?? "Unknown data processing error"}");
-                }
-                else if (www.result != UnityWebRequest.Result.Success)
-                {
-                    statusMessage = $"Request Failed: {www.result}";
-                    Debug.LogError($"Request Failed: {www.result} - {www.error ?? "Unknown error"}");
+                    statusMessage = response.message;
+                    currentRepoURL = response.repo_url;
+                    currentProjectID = response.project_id;
+                    token = response.token;
                 }
                 else
                 {
-                    // Success case - but still need to validate response
-                    string responseText = www.downloadHandler?.text ?? "";
-
-                    if (string.IsNullOrEmpty(responseText))
-                    {
-                        statusMessage = "Error: Server returned empty response";
-                        Debug.LogError("Server returned empty response");
-                        Repaint();
-                        yield break; // Exit the coroutine early
-                    }
-
-                    try
-                    {
-                        StartCollaborationResponse response = JsonUtility.FromJson<StartCollaborationResponse>(responseText);
-
-                        if (response == null)
-                        {
-                            statusMessage = "Error: Could not parse server response";
-                            Debug.LogError($"JSON parsing returned null. Response was: {responseText}");
-                        }
-                        else if (response.success)
-                        {
-                            statusMessage = "Success: " + (response.message ?? "Repository created successfully");
-                            currentProjectID = response.project_id ?? "";
-                            currentRepoURL = response.repo_url ?? "";
-
-                            Debug.Log("Project created successfully!");
-                            Debug.Log($"Project ID: {currentProjectID}");
-                            Debug.Log($"Repository URL: {currentRepoURL}");
-                        }
-                        else
-                        {
-                            statusMessage = "Error: " + (response.message ?? "Unknown server error");
-                            Debug.LogError($"Server reported failure: {response.message ?? "Unknown error"}");
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        statusMessage = "Error: Invalid response format from server";
-                        Debug.LogError($"JSON Parse Error: {e.Message}");
-                        Debug.LogError($"Response that failed to parse: {responseText}");
-                    }
+                    statusMessage = "Error: " + response.message;
                 }
             }
-            // catch (Exception e)
-            // {
-            //     // Catch any unexpected errors in the entire process
-            //     isLoading = false;
-            //     statusMessage = "Error: Unexpected error occurred";
-            //     Debug.LogError($"Unexpected error in SendStartCollaborationRequest: {e.Message}");
-            //     Debug.LogError($"Stack trace: {e.StackTrace}");
-            // }
-            finally
-            {
-                // Ensure UI gets updated regardless of what happens
-                Repaint();
-            }
+
+            Repaint();
         }
     }
 
+    #endregion
+
+    #region Simulated Git Actions
+
+    private void StartSimulatedPush()
+    {
+        EditorCoroutineUtility.StartCoroutine(SimulateGitAction("Push"));
+    }
+
+    private void StartSimulatedPull()
+    {
+        EditorCoroutineUtility.StartCoroutine(SimulateGitAction("Pull"));
+    }
+
+    private IEnumerator SimulateGitAction(string action)
+    {
+        isLoading = true;
+        statusMessage = $"{action} in progress...";
+        Repaint();
+
+        float progress = 0f;
+        
+        float stepDelay = 0.2f;
+        double nextTime = EditorApplication.timeSinceStartup;
+
+        while (progress < 1f)
+        {
+            if (EditorApplication.timeSinceStartup >= nextTime)
+            {
+                progress += 0.1f;
+                EditorUtility.DisplayProgressBar(
+                    $"{action} to GitHub",
+                    $"{action}ing changes... ({(int)(progress * 100)}%)",
+                    progress
+                );
+                nextTime = EditorApplication.timeSinceStartup + stepDelay;
+            }
+
+            yield return null; // Let the Editor update between frames
+        }
+
+
+        EditorUtility.ClearProgressBar();
+        isLoading = false;
+
+        if (action == "Push")
+        {
+            statusMessage = "Changes successfully pushed to GitHub (simulated).";
+            Debug.Log($"[URTC] {action} simulation complete at {DateTime.Now}");
+        }
+        else
+        {
+            statusMessage = "Latest changes pulled from GitHub (simulated).";
+            Debug.Log($"[URTC] {action} simulation complete at {DateTime.Now}");
+        }
+
+        Repaint();
+    }
+
+    #endregion
 
     private void OnDestroy()
     {
-        // Stop all coroutines when window is closed
         EditorCoroutineUtility.StopAllCoroutines();
+        EditorUtility.ClearProgressBar();
     }
 }
